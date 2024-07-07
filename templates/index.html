@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Camera Object Detection</title>
+    <style>
+        #videoElement {
+            width: 100%;
+            height: auto;
+            display: none;
+        }
+        #canvasElement {
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>Live Camera Object Detection</h1>
+    <video id="videoElement" autoplay></video>
+    <canvas id="canvasElement"></canvas>
+    <img id="processedImage" style="display: none;">
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script>
+        let lastSpokenObjects = new Set(); // Set to store the names of objects that were last spoken
+        let currentFacingMode = "environment"; // Start with the back camera
+
+        async function startCamera() {
+            const constraints = {
+                video: {
+                    facingMode: { ideal: currentFacingMode }
+                }
+            };
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const videoElement = document.getElementById('videoElement');
+                videoElement.srcObject = stream;
+
+            } catch (error) {
+                console.error('Error accessing the camera:', error);
+            }
+        }
+
+        async function detectAndDraw() {
+            const video = document.getElementById('videoElement');
+            const canvas = document.getElementById('canvasElement');
+            const ctx = canvas.getContext('2d');
+
+            const targetWidth = 640;
+            const targetHeight = video.videoHeight * (targetWidth / video.videoWidth);
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageData = canvas.toDataURL('image/jpeg', 0.5); // Adjust image quality if needed
+
+            $.ajax({
+                type: 'POST',
+                url: '/detect_objects',
+                data: { image_data: imageData },
+                success: function(response) {
+                    const processedImage = new Image();
+                    processedImage.src = 'data:image/jpeg;base64,' + response.image_data;
+                    processedImage.onload = function() {
+                        const displayImage = document.getElementById('processedImage');
+                        displayImage.src = processedImage.src;
+                        displayImage.style.display = 'block';
+
+                        const detectedObjects = new Set(response.detected_objects);
+                        // Check if detected objects have changed
+                        if (!areSetsEqual(lastSpokenObjects, detectedObjects)) {
+                            lastSpokenObjects = detectedObjects;
+                            speakObjects(detectedObjects);
+                        }
+                    };
+                },
+                error: function(xhr, status, error) {
+                    console.error('Error:', error);
+                }
+            });
+
+            setTimeout(detectAndDraw, 500);
+        }
+
+        function areSetsEqual(set1, set2) {
+            if (set1.size !== set2.size) return false;
+            for (let item of set1) {
+                if (!set2.has(item)) return false;
+            }
+            return true;
+        }
+
+        function speakObjects(objects) {
+            const objectsArray = Array.from(objects); // Convert Set to Array
+            const message = "I saw " + objectsArray.join(", ");
+            speakMessage(message);
+        }
+
+        function speakMessage(message) {
+            const synth = window.speechSynthesis;
+            const utterance = new SpeechSynthesisUtterance(message);
+            synth.speak(utterance);
+        }
+
+        startCamera();
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } })
+            .then(function(stream) {
+                const videoElement = document.getElementById('videoElement');
+                videoElement.srcObject = stream;
+                videoElement.play();
+                detectAndDraw();  
+            })
+            .catch(function(error) {
+                console.error('Error accessing camera:', error);
+            });
+
+    </script>
+</body>
+</html>
